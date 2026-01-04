@@ -1,0 +1,20 @@
+# 환경변수, 캐시, 가상환경 등 제외
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+# IDE
+.idea/
+.vscode/
+
+# 테스트 커버리지
+.coverage
+htmlcov/
+
+# 빌드
+dist/
+build/
+*.egg-info/
