@@ -47,25 +47,42 @@ class GitSync:
             commit_message: 커밋 메시지. None이면 자동 생성
         """
         try:
-            # 변경된 파일 확인
-            if not self.repo.is_dirty() and not self.repo.untracked_files:
-                logger.info("변경된 파일이 없습니다.")
-                return True
+            # 변경된 파일이 있으면 커밋
+            if self.repo.is_dirty() or self.repo.untracked_files:
+                # 모든 변경사항 스테이징
+                self.repo.git.add(A=True)
+                
+                # 커밋 메시지 생성
+                if commit_message is None:
+                    from datetime import datetime
+                    commit_message = f"Auto commit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+                
+                # 커밋
+                self.repo.index.commit(commit_message)
+                logger.info(f"커밋 완료: {commit_message}")
             
-            # 모든 변경사항 스테이징
-            self.repo.git.add(A=True)
+            # 원격과 비교하여 푸시할 커밋이 있는지 확인
+            origin = self.repo.remotes.origin
             
-            # 커밋 메시지 생성
-            if commit_message is None:
-                from datetime import datetime
-                commit_message = f"Auto commit: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}"
+            # fetch하여 원격 정보 업데이트
+            origin.fetch()
             
-            # 커밋
-            self.repo.index.commit(commit_message)
-            logger.info(f"커밋 완료: {commit_message}")
+            # 로컬과 원격 비교
+            local_commit = self.repo.head.commit
+            try:
+                remote_commit = self.repo.refs[f'origin/{self.repo.active_branch.name}'].commit
+                commits_ahead = list(self.repo.iter_commits(f'origin/{self.repo.active_branch.name}..HEAD'))
+                
+                if not commits_ahead:
+                    logger.info("원격 저장소와 동기화 상태입니다.")
+                    return True
+                    
+                logger.info(f"푸시할 커밋: {len(commits_ahead)}개")
+            except (IndexError, KeyError):
+                # 원격 브랜치가 없는 경우 (새 브랜치)
+                logger.info("원격 브랜치가 없습니다. 새로 푸시합니다.")
             
             # 푸시
-            origin = self.repo.remotes.origin
             origin.push()
             logger.success("✅ Git push 완료")
             return True
