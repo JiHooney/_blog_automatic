@@ -28,5 +28,8 @@ GitPython>=3.1.40
 # 마크다운 파싱
 python-frontmatter>=1.0.0
 
+# Windows 클립보드 지원 (Windows에서만 필요, 선택 사항)
+# pip install pywin32  # Windows에서 이미지 업로드 시 필요
+
 # 테스트
 pytest>=7.4.0

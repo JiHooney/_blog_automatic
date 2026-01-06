@@ -3,7 +3,10 @@
 Selenium을 사용하여 티스토리에 글 발행
 """
 import os
+import sys
 import time
+import subprocess
+import platform
 from pathlib import Path
 from typing import Optional
 from selenium.webdriver.common.by import By
@@ -575,6 +578,136 @@ class TistoryPublisher(BasePublisher):
         
         return ''.join(html_lines)
     
+    def _copy_image_to_clipboard(self, image_path: str) -> bool:
+        """이미지를 클립보드에 복사 (OS별 분기)
+        
+        Args:
+            image_path: 이미지 파일 경로
+            
+        Returns:
+            복사 성공 여부
+        """
+        current_os = platform.system()
+        
+        if current_os == "Darwin":  # macOS
+            return self._copy_image_clipboard_macos(image_path)
+        elif current_os == "Windows":
+            return self._copy_image_clipboard_windows(image_path)
+        elif current_os == "Linux":
+            return self._copy_image_clipboard_linux(image_path)
+        else:
+            logger.error(f"❌ 지원하지 않는 OS: {current_os}")
+            return False
+    
+    def _copy_image_clipboard_macos(self, image_path: str) -> bool:
+        """macOS: osascript로 이미지 클립보드 복사"""
+        script = f'''
+        set theFile to POSIX file "{image_path}"
+        set theImage to read theFile as JPEG picture
+        set the clipboard to theImage
+        '''
+        
+        result = subprocess.run(
+            ['osascript', '-e', script],
+            capture_output=True,
+            text=True,
+            timeout=30
+        )
+        
+        if result.returncode != 0:
+            logger.warning(f"⚠️ macOS 클립보드 복사 실패: {result.stderr}")
+            return False
+        return True
+    
+    def _copy_image_clipboard_windows(self, image_path: str) -> bool:
+        """Windows: PowerShell로 이미지 클립보드 복사"""
+        try:
+            # 방법 1: PowerShell의 System.Windows.Forms.Clipboard 사용
+            ps_script = f'''
+            Add-Type -AssemblyName System.Windows.Forms
+            $image = [System.Drawing.Image]::FromFile("{image_path}")
+            [System.Windows.Forms.Clipboard]::SetImage($image)
+            '''
+            
+            result = subprocess.run(
+                ['powershell', '-Command', ps_script],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                return True
+            
+            # 방법 2: Python의 win32clipboard 모듈 시도
+            try:
+                from PIL import Image
+                import io
+                import win32clipboard
+                
+                # 이미지를 BMP 형식으로 변환
+                img = Image.open(image_path)
+                output = io.BytesIO()
+                img.convert('RGB').save(output, 'BMP')
+                data = output.getvalue()[14:]  # BMP 헤더 제거
+                output.close()
+                
+                win32clipboard.OpenClipboard()
+                win32clipboard.EmptyClipboard()
+                win32clipboard.SetClipboardData(win32clipboard.CF_DIB, data)
+                win32clipboard.CloseClipboard()
+                return True
+                
+            except ImportError:
+                logger.warning("⚠️ win32clipboard 미설치. PowerShell 실패 시 'pip install pywin32' 필요")
+                return False
+                
+        except Exception as e:
+            logger.warning(f"⚠️ Windows 클립보드 복사 실패: {e}")
+            return False
+    
+    def _copy_image_clipboard_linux(self, image_path: str) -> bool:
+        """Linux: xclip으로 이미지 클립보드 복사"""
+        try:
+            # xclip 사용
+            result = subprocess.run(
+                ['xclip', '-selection', 'clipboard', '-t', 'image/png', '-i', image_path],
+                capture_output=True,
+                text=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                return True
+            
+            # xsel 대안 시도
+            result = subprocess.run(
+                ['xsel', '--clipboard', '--input', '--type', 'image/png'],
+                input=open(image_path, 'rb').read(),
+                capture_output=True,
+                timeout=30
+            )
+            
+            if result.returncode == 0:
+                return True
+                
+            logger.warning("⚠️ Linux 클립보드 복사 실패. 'apt install xclip' 또는 'apt install xsel' 필요")
+            return False
+            
+        except FileNotFoundError:
+            logger.warning("⚠️ xclip/xsel 미설치. 'apt install xclip' 필요")
+            return False
+        except Exception as e:
+            logger.warning(f"⚠️ Linux 클립보드 복사 실패: {e}")
+            return False
+    
+    def _get_paste_key(self):
+        """OS별 붙여넣기 키 반환"""
+        if platform.system() == "Darwin":
+            return Keys.COMMAND
+        else:  # Windows, Linux
+            return Keys.CONTROL
+    
     def _close_modal_if_exists(self):
         """TinyMCE 모달 오버레이가 있으면 닫기"""
         from selenium.webdriver.common.action_chains import ActionChains
@@ -638,14 +771,16 @@ class TistoryPublisher(BasePublisher):
             {파일명: 업로드된 URL} 딕셔너리
         """
         import subprocess
-        import platform
         from selenium.webdriver.common.action_chains import ActionChains
         
         uploaded = {}
         
-        if platform.system() != 'Darwin':
-            logger.warning("⚠️ 클립보드 이미지 업로드는 현재 macOS만 지원됩니다.")
+        current_os = platform.system()
+        if current_os not in ('Darwin', 'Windows', 'Linux'):
+            logger.warning(f"⚠️ 클립보드 이미지 업로드는 {current_os}를 지원하지 않습니다.")
             return uploaded
+        
+        logger.info(f"🖥️ OS 감지: {current_os}")
         
         # 첫 이미지 업로드 전 에디터 준비 - 반드시 에디터에 포커스가 있어야 함
         try:
@@ -712,19 +847,15 @@ class TistoryPublisher(BasePublisher):
                     except Exception as e:
                         logger.warning(f"이미지 리사이즈 실패: {e}")
                 
-                # 1. 이미지를 클립보드에 복사 (osascript 사용)
-                script = f'''
-                set theFile to POSIX file "{path}"
-                set theImage to read theFile as JPEG picture
-                set the clipboard to theImage
-                '''
-                
-                result = subprocess.run(
-                    ['osascript', '-e', script],
-                    capture_output=True,
-                    text=True,
-                    timeout=30  # 큰 이미지를 위해 타임아웃 증가
-                )
+                # 1. 이미지를 클립보드에 복사 (OS별 분기)
+                if not self._copy_image_to_clipboard(path):
+                    # 임시 파일 정리
+                    if temp_image_path and Path(temp_image_path).exists():
+                        try:
+                            os.remove(temp_image_path)
+                        except:
+                            pass
+                    continue
                 
                 # 임시 파일 정리
                 if temp_image_path and Path(temp_image_path).exists():
@@ -732,10 +863,6 @@ class TistoryPublisher(BasePublisher):
                         os.remove(temp_image_path)
                     except:
                         pass
-                
-                if result.returncode != 0:
-                    logger.warning(f"⚠️ 클립보드 복사 실패: {result.stderr}")
-                    continue
                 
                 logger.debug(f"클립보드에 이미지 복사 완료: {name}")
                 
@@ -763,7 +890,8 @@ class TistoryPublisher(BasePublisher):
                     time.sleep(0.2)
                     
                     actions = ActionChains(self.driver)
-                    actions.key_down(Keys.COMMAND).send_keys('v').key_up(Keys.COMMAND).perform()
+                    paste_key = self._get_paste_key()
+                    actions.key_down(paste_key).send_keys('v').key_up(paste_key).perform()
                     
                     self.driver.switch_to.default_content()
                     
