@@ -384,7 +384,34 @@ class TistoryPublisher(BasePublisher):
             # 발행 버튼 클릭
             self._click_publish_button()
             
+            # 발행 결과 확인 (에러 팝업 감지)
             time.sleep(3)
+            
+            # 에러 팝업 확인
+            try:
+                # 티스토리 에러 팝업: "게시글을 작성하는데 실패했습니다"
+                error_elements = self.driver.find_elements(By.XPATH, "//*[contains(text(), '실패')]")
+                if error_elements:
+                    logger.error("❌ 티스토리 발행 실패: 에러 팝업 감지됨")
+                    # 확인 버튼 클릭
+                    try:
+                        confirm_btn = self.driver.find_element(By.XPATH, "//button[contains(text(), '확인')]")
+                        confirm_btn.click()
+                    except:
+                        pass
+                    return False
+            except:
+                pass
+            
+            # URL 변경 확인 (발행 성공 시 글 페이지로 이동)
+            current_url = self.driver.current_url
+            if "newpost" in current_url or "manage" in current_url:
+                # 아직 작성 페이지에 있으면 실패 가능성
+                time.sleep(2)
+                current_url = self.driver.current_url
+                if "newpost" in current_url:
+                    logger.warning("⚠️ 발행 후에도 작성 페이지에 머물러 있음 - 실패 가능성")
+            
             logger.success(f"✅ 티스토리 발행 완료: {title}")
             return True
             
@@ -549,7 +576,11 @@ class TistoryPublisher(BasePublisher):
         return ''.join(html_lines)
     
     def _upload_images(self, image_map: dict) -> dict:
-        """이미지 업로드
+        """이미지 업로드 - 클립보드 붙여넣기 방식 (macOS)
+        
+        이미지를 클립보드에 복사한 후 에디터에 Cmd+V로 붙여넣기하여 업로드합니다.
+        업로드 후 이미지 URL만 수집하고, 에디터 내용은 비웁니다.
+        (본문 입력 시 HTML에 이미지 URL을 포함하여 설정)
         
         Args:
             image_map: {파일명: 경로} 딕셔너리
@@ -557,7 +588,15 @@ class TistoryPublisher(BasePublisher):
         Returns:
             {파일명: 업로드된 URL} 딕셔너리
         """
+        import subprocess
+        import platform
+        from selenium.webdriver.common.action_chains import ActionChains
+        
         uploaded = {}
+        
+        if platform.system() != 'Darwin':
+            logger.warning("⚠️ 클립보드 이미지 업로드는 현재 macOS만 지원됩니다.")
+            return uploaded
         
         for name, path in image_map.items():
             try:
@@ -567,115 +606,71 @@ class TistoryPublisher(BasePublisher):
                 
                 logger.info(f"📷 이미지 업로드 시도: {name}")
                 
-                # 티스토리 에디터에서 이미지 업로드
-                # 방법 1: 툴바의 이미지 버튼 클릭 후 파일 선택
+                # 1. 이미지를 클립보드에 복사 (osascript 사용)
+                script = f'''
+                set theFile to POSIX file "{path}"
+                set theImage to read theFile as JPEG picture
+                set the clipboard to theImage
+                '''
+                
+                result = subprocess.run(
+                    ['osascript', '-e', script],
+                    capture_output=True,
+                    text=True,
+                    timeout=10
+                )
+                
+                if result.returncode != 0:
+                    logger.warning(f"⚠️ 클립보드 복사 실패: {result.stderr}")
+                    continue
+                
+                logger.debug(f"클립보드에 이미지 복사 완료: {name}")
+                
+                # 2. 에디터 iframe으로 전환
                 try:
-                    # 이미지 삽입 버튼 찾기 (여러 셀렉터 시도)
-                    image_btn_selectors = [
-                        "button.btn-insert-image",
-                        "[data-command='image']",
-                        ".mce-ico.mce-i-image",
-                        "button[aria-label*='이미지']",
-                        ".editor-toolbar button:nth-child(3)",  # 대략적인 위치
-                    ]
+                    iframe = self.driver.find_element(By.CSS_SELECTOR, "#editor-tistory_ifr, iframe[id*='ifr']")
+                    self.driver.switch_to.frame(iframe)
                     
-                    image_btn = None
-                    for selector in image_btn_selectors:
-                        try:
-                            image_btn = self.driver.find_element(By.CSS_SELECTOR, selector)
-                            if image_btn and image_btn.is_displayed():
-                                break
-                        except:
-                            continue
+                    # 3. 에디터 body에 포커스
+                    editor_body = self.driver.find_element(By.TAG_NAME, "body")
+                    editor_body.click()
+                    time.sleep(0.3)
                     
-                    if image_btn:
-                        image_btn.click()
-                        time.sleep(1)
-                except:
-                    pass
-                
-                # 파일 input 찾기 (숨겨진 input도 포함)
-                file_input = None
-                
-                # JavaScript로 숨겨진 file input도 찾기
-                file_inputs = self.driver.execute_script("""
-                    return document.querySelectorAll('input[type="file"]');
-                """)
-                
-                if file_inputs and len(file_inputs) > 0:
-                    file_input = file_inputs[0]
-                
-                if not file_input:
-                    # 직접 셀렉터로 시도
-                    file_input_selectors = [
-                        "input[type='file']",
-                        "input[accept*='image']",
-                        "#file-upload",
-                        ".file-input"
-                    ]
+                    # 4. Cmd+V로 붙여넣기
+                    actions = ActionChains(self.driver)
+                    actions.key_down(Keys.COMMAND).send_keys('v').key_up(Keys.COMMAND).perform()
                     
-                    for selector in file_input_selectors:
-                        try:
-                            file_input = self.driver.find_element(By.CSS_SELECTOR, selector)
-                            if file_input:
-                                break
-                        except:
-                            continue
-                
-                if file_input:
-                    # JavaScript로 input을 visible하게 만들기
-                    self.driver.execute_script("""
-                        arguments[0].style.display = 'block';
-                        arguments[0].style.visibility = 'visible';
-                        arguments[0].style.opacity = '1';
-                    """, file_input)
-                    
-                    # 파일 경로 전송
-                    file_input.send_keys(str(Path(path).absolute()))
                     time.sleep(3)  # 업로드 대기
                     
-                    # 업로드 완료 후 이미지 URL 가져오기
-                    try:
-                        iframe = self.driver.find_element(By.CSS_SELECTOR, "#editor-tistory_ifr, iframe[id*='ifr']")
-                        self.driver.switch_to.frame(iframe)
-                        imgs = self.driver.find_elements(By.TAG_NAME, "img")
-                        if imgs:
-                            img_url = imgs[-1].get_attribute("src")
-                            if img_url and img_url.startswith("http"):
-                                uploaded[name] = img_url
-                                logger.info(f"✅ 이미지 업로드 완료: {name}")
-                        self.driver.switch_to.default_content()
-                    except Exception as e:
-                        self.driver.switch_to.default_content()
-                        logger.debug(f"이미지 URL 추출 실패: {e}")
-                else:
-                    # 파일 input이 없으면 JavaScript로 생성해서 시도
-                    logger.debug("파일 input 없음 - JavaScript로 생성 시도")
+                    # 5. 이미지 URL 가져오기
+                    imgs = self.driver.find_elements(By.TAG_NAME, "img")
+                    if imgs:
+                        img_url = imgs[-1].get_attribute("src")
+                        if img_url and img_url.startswith("http"):
+                            uploaded[name] = img_url
+                            logger.info(f"✅ 이미지 업로드 완료: {name}")
                     
-                    # TinyMCE에 직접 이미지 삽입 시도 (base64)
-                    try:
-                        import base64
-                        with open(path, 'rb') as f:
-                            img_data = base64.b64encode(f.read()).decode('utf-8')
-                        
-                        # 이미지 확장자 확인
-                        ext = Path(path).suffix.lower()
-                        mime_type = {
-                            '.jpg': 'image/jpeg',
-                            '.jpeg': 'image/jpeg',
-                            '.png': 'image/png',
-                            '.gif': 'image/gif',
-                            '.webp': 'image/webp'
-                        }.get(ext, 'image/jpeg')
-                        
-                        data_url = f"data:{mime_type};base64,{img_data}"
-                        uploaded[name] = data_url
-                        logger.info(f"✅ 이미지 base64 변환 완료: {name}")
-                    except Exception as e:
-                        logger.warning(f"⚠️ base64 변환 실패: {e}")
+                    self.driver.switch_to.default_content()
+                    
+                except Exception as e:
+                    self.driver.switch_to.default_content()
+                    logger.warning(f"⚠️ 붙여넣기 실패: {e}")
                     
             except Exception as e:
                 logger.warning(f"⚠️ 이미지 업로드 실패 ({name}): {e}")
+        
+        # 모든 이미지 업로드 완료 후 에디터 내용 비우기
+        # (본문 입력 시 HTML로 다시 설정할 것이므로)
+        if uploaded:
+            try:
+                self.driver.execute_script("""
+                    if (typeof tinymce !== 'undefined' && tinymce.activeEditor) {
+                        tinymce.activeEditor.setContent('');
+                    }
+                """)
+                logger.debug("에디터 내용 초기화 완료")
+            except:
+                pass
         
         return uploaded
     
