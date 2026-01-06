@@ -640,7 +640,7 @@ class TistoryPublisher(BasePublisher):
                     actions = ActionChains(self.driver)
                     actions.key_down(Keys.COMMAND).send_keys('v').key_up(Keys.COMMAND).perform()
                     
-                    time.sleep(3)  # 업로드 대기
+                    time.sleep(6)  # 업로드 대기 (이미지당 6초 필요)
                     
                     # 5. 이미지 URL 가져오기
                     imgs = self.driver.find_elements(By.TAG_NAME, "img")
