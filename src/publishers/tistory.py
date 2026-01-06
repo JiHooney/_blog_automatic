@@ -575,6 +575,55 @@ class TistoryPublisher(BasePublisher):
         
         return ''.join(html_lines)
     
+    def _close_modal_if_exists(self):
+        """TinyMCE 모달 오버레이가 있으면 닫기"""
+        from selenium.webdriver.common.action_chains import ActionChains
+        from selenium.webdriver.common.keys import Keys
+        
+        try:
+            self.driver.switch_to.default_content()
+            
+            # mce-modal-block 오버레이 확인 및 제거
+            modal_blocks = self.driver.find_elements(By.CSS_SELECTOR, "#mce-modal-block, .mce-modal-block")
+            if modal_blocks:
+                for modal in modal_blocks:
+                    try:
+                        self.driver.execute_script("arguments[0].remove();", modal)
+                    except:
+                        pass
+                logger.debug("모달 오버레이 제거됨")
+            
+            # mce-dragh (에디터 리사이즈 핸들러) 제거
+            dragh_elements = self.driver.find_elements(By.CSS_SELECTOR, ".mce-dragh, #mceu_29-dragh")
+            for elem in dragh_elements:
+                try:
+                    self.driver.execute_script("arguments[0].style.display = 'none';", elem)
+                except:
+                    pass
+            
+            # mce-window (팝업 창) 닫기
+            mce_windows = self.driver.find_elements(By.CSS_SELECTOR, ".mce-window")
+            for win in mce_windows:
+                try:
+                    close_btn = win.find_elements(By.CSS_SELECTOR, ".mce-close, button[aria-label='Close']")
+                    if close_btn:
+                        close_btn[0].click()
+                    else:
+                        self.driver.execute_script("arguments[0].remove();", win)
+                except:
+                    pass
+            
+            # ESC 키로 모달 닫기 시도
+            try:
+                actions = ActionChains(self.driver)
+                actions.send_keys(Keys.ESCAPE).perform()
+                time.sleep(0.3)
+            except:
+                pass
+                
+        except Exception as e:
+            logger.debug(f"모달 닫기 중 오류 (무시): {e}")
+    
     def _upload_images(self, image_map: dict) -> dict:
         """이미지 업로드 - 클립보드 붙여넣기 방식 (macOS)
         
@@ -598,6 +647,30 @@ class TistoryPublisher(BasePublisher):
             logger.warning("⚠️ 클립보드 이미지 업로드는 현재 macOS만 지원됩니다.")
             return uploaded
         
+        # 첫 이미지 업로드 전 에디터 준비 - 반드시 에디터에 포커스가 있어야 함
+        try:
+            self.driver.switch_to.default_content()
+            
+            # TinyMCE 에디터 포커스
+            self.driver.execute_script("""
+                if (typeof tinymce !== 'undefined' && tinymce.activeEditor) {
+                    tinymce.activeEditor.focus();
+                }
+            """)
+            time.sleep(0.5)
+            
+            # iframe 내부에서 클릭하여 에디터 활성화
+            iframe = self.driver.find_element(By.CSS_SELECTOR, "#editor-tistory_ifr, iframe[id*='ifr']")
+            self.driver.switch_to.frame(iframe)
+            editor_body = self.driver.find_element(By.TAG_NAME, "body")
+            editor_body.click()
+            time.sleep(0.5)
+            self.driver.switch_to.default_content()
+            
+            logger.debug("에디터 준비 완료")
+        except Exception as e:
+            logger.debug(f"에디터 준비 중 오류 (계속 진행): {e}")
+        
         for name, path in image_map.items():
             try:
                 if not Path(path).exists():
@@ -605,6 +678,39 @@ class TistoryPublisher(BasePublisher):
                     continue
                 
                 logger.info(f"📷 이미지 업로드 시도: {name}")
+                
+                # 모달이 있으면 닫기 (이전 업로드에서 남아있을 수 있음)
+                self._close_modal_if_exists()
+                
+                # 0. 이미지 크기 확인 및 필요시 리사이즈
+                image_path = Path(path)
+                temp_image_path = None
+                file_size_mb = image_path.stat().st_size / (1024 * 1024)
+                
+                if file_size_mb > 4:  # 4MB 이상이면 리사이즈
+                    try:
+                        from PIL import Image
+                        import tempfile
+                        
+                        with Image.open(path) as img:
+                            # 최대 크기 제한 (가로 1800px)
+                            max_width = 1800
+                            if img.width > max_width:
+                                ratio = max_width / img.width
+                                new_size = (max_width, int(img.height * ratio))
+                                img = img.resize(new_size, Image.LANCZOS)
+                            
+                            # 임시 파일로 저장 (품질 85%)
+                            temp_fd, temp_path = tempfile.mkstemp(suffix='.jpg')
+                            os.close(temp_fd)
+                            img.convert('RGB').save(temp_path, 'JPEG', quality=85)
+                            temp_image_path = temp_path
+                            
+                            new_size_mb = Path(temp_path).stat().st_size / (1024 * 1024)
+                            logger.debug(f"이미지 리사이즈: {file_size_mb:.1f}MB → {new_size_mb:.1f}MB")
+                            path = temp_path
+                    except Exception as e:
+                        logger.warning(f"이미지 리사이즈 실패: {e}")
                 
                 # 1. 이미지를 클립보드에 복사 (osascript 사용)
                 script = f'''
@@ -617,8 +723,15 @@ class TistoryPublisher(BasePublisher):
                     ['osascript', '-e', script],
                     capture_output=True,
                     text=True,
-                    timeout=10
+                    timeout=30  # 큰 이미지를 위해 타임아웃 증가
                 )
+                
+                # 임시 파일 정리
+                if temp_image_path and Path(temp_image_path).exists():
+                    try:
+                        os.remove(temp_image_path)
+                    except:
+                        pass
                 
                 if result.returncode != 0:
                     logger.warning(f"⚠️ 클립보드 복사 실패: {result.stderr}")
@@ -626,34 +739,112 @@ class TistoryPublisher(BasePublisher):
                 
                 logger.debug(f"클립보드에 이미지 복사 완료: {name}")
                 
-                # 2. 에디터 iframe으로 전환
+                # 2. 에디터 iframe으로 전환 및 붙여넣기
                 try:
+                    self.driver.switch_to.default_content()
+                    
+                    # JavaScript로 TinyMCE 에디터에 포커스
+                    self.driver.execute_script("""
+                        if (typeof tinymce !== 'undefined' && tinymce.activeEditor) {
+                            tinymce.activeEditor.focus();
+                        }
+                    """)
+                    time.sleep(0.3)
+                    
                     iframe = self.driver.find_element(By.CSS_SELECTOR, "#editor-tistory_ifr, iframe[id*='ifr']")
                     self.driver.switch_to.frame(iframe)
                     
-                    # 3. 에디터 body에 포커스
-                    editor_body = self.driver.find_element(By.TAG_NAME, "body")
-                    editor_body.click()
-                    time.sleep(0.3)
+                    # 3. 붙여넣기 전 이미지 개수 확인
+                    imgs_before = self.driver.find_elements(By.TAG_NAME, "img")
+                    count_before = len(imgs_before)
                     
-                    # 4. Cmd+V로 붙여넣기
+                    # 4. JavaScript로 body에 포커스 및 붙여넣기
+                    self.driver.execute_script("document.body.focus();")
+                    time.sleep(0.2)
+                    
                     actions = ActionChains(self.driver)
                     actions.key_down(Keys.COMMAND).send_keys('v').key_up(Keys.COMMAND).perform()
                     
-                    time.sleep(6)  # 업로드 대기 (이미지당 6초 필요)
-                    
-                    # 5. 이미지 URL 가져오기
-                    imgs = self.driver.find_elements(By.TAG_NAME, "img")
-                    if imgs:
-                        img_url = imgs[-1].get_attribute("src")
-                        if img_url and img_url.startswith("http"):
-                            uploaded[name] = img_url
-                            logger.info(f"✅ 이미지 업로드 완료: {name}")
-                    
                     self.driver.switch_to.default_content()
+                    
+                    # 5. 이미지 업로드 완료 대기 (iframe 내 이미지 개수 + CDN URL 확인)
+                    max_wait = 60
+                    poll_interval = 1
+                    elapsed = 0
+                    img_url = None
+                    
+                    while elapsed < max_wait:
+                        time.sleep(poll_interval)
+                        elapsed += poll_interval
+                        
+                        try:
+                            # iframe으로 전환하여 이미지 확인
+                            self.driver.switch_to.default_content()
+                            iframe = self.driver.find_element(By.CSS_SELECTOR, "#editor-tistory_ifr, iframe[id*='ifr']")
+                            self.driver.switch_to.frame(iframe)
+                            
+                            imgs_after = self.driver.find_elements(By.TAG_NAME, "img")
+                            
+                            if len(imgs_after) > count_before:
+                                new_img = imgs_after[-1]
+                                src = new_img.get_attribute("src")
+                                
+                                if src and src.startswith("http") and "kakaocdn" in src:
+                                    img_url = src
+                                    logger.info(f"✅ 이미지 업로드 완료 ({elapsed:.1f}초): {name}")
+                                    self.driver.switch_to.default_content()
+                                    break
+                                else:
+                                    logger.debug(f"이미지 처리 중... ({elapsed:.1f}초) - src: {src[:50] if src else 'None'}...")
+                            else:
+                                logger.debug(f"이미지 대기 중... ({elapsed:.1f}초)")
+                            
+                            self.driver.switch_to.default_content()
+                        except Exception as e:
+                            try:
+                                self.driver.switch_to.default_content()
+                            except:
+                                pass
+                            logger.debug(f"확인 중 오류: {e}")
+                    
+                    if img_url:
+                        uploaded[name] = img_url
+                    else:
+                        # 타임아웃 - 마지막으로 한번 더 확인
+                        try:
+                            self.driver.switch_to.default_content()
+                            iframe = self.driver.find_element(By.CSS_SELECTOR, "#editor-tistory_ifr, iframe[id*='ifr']")
+                            self.driver.switch_to.frame(iframe)
+                            imgs_final = self.driver.find_elements(By.TAG_NAME, "img")
+                            
+                            # 새 이미지가 있는지 확인
+                            if len(imgs_final) > count_before:
+                                new_img = imgs_final[-1]
+                                src = new_img.get_attribute("src")
+                                if src and src.startswith("http"):
+                                    uploaded[name] = src
+                                    logger.info(f"✅ 이미지 업로드 완료 (타임아웃 직전): {name}")
+                                else:
+                                    logger.warning(f"⚠️ 이미지 업로드 타임아웃: {name} - src: {src[:30] if src else 'None'}")
+                            else:
+                                logger.warning(f"⚠️ 이미지 업로드 타임아웃: {name} (이미지 없음)")
+                            
+                            self.driver.switch_to.default_content()
+                        except Exception as e:
+                            try:
+                                self.driver.switch_to.default_content()
+                            except:
+                                pass
+                            logger.warning(f"⚠️ 이미지 업로드 타임아웃: {name}")
+                    
+                    # 모달 닫기 (업로드 완료 후 모달이 있을 수 있음)
+                    self._close_modal_if_exists()
                     
                 except Exception as e:
-                    self.driver.switch_to.default_content()
+                    try:
+                        self.driver.switch_to.default_content()
+                    except:
+                        pass
                     logger.warning(f"⚠️ 붙여넣기 실패: {e}")
                     
             except Exception as e:
