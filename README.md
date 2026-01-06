@@ -14,18 +14,33 @@ mkdir -p input/2026/01/맛집_강릉_카페클램
 # 3. media 폴더에 이미지 추가 (선택)
 ```
 
-### 2. 발행
+### 2. 발행 (대화형 모드 - 추천)
 
 ```bash
 # 가상환경 활성화
 source .venv/bin/activate
 
-# 발행 실행 (네이버 + 티스토리)
-python blog_cli.py run input/2026/01/맛집_강릉_카페클램/post.md -y
+# 대화형 모드 실행 (인자 없이 실행)
+python main.py
+```
+
+**대화형 모드 흐름:**
+1. 자동으로 Git pull 동기화
+2. 입력 포스트 목록 표시
+3. 발행할 글 번호 선택 (1, 1,2,3, 1-3, all)
+4. 발행 플랫폼 선택 (all/naver/tistory)
+5. AI 초안 생성 및 발행
+6. 완료 후 Git push 제안
+
+### 3. 발행 (직접 명령어)
+
+```bash
+# 특정 글 발행 (네이버 + 티스토리)
+python main.py run input/2026/01/맛집_강릉_카페클램/post.md -y
 
 # 특정 플랫폼만 발행
-python blog_cli.py run input/2026/01/맛집_강릉_카페클램/post.md -p naver -y
-python blog_cli.py run input/2026/01/맛집_강릉_카페클램/post.md -p tistory -y
+python main.py run input/2026/01/맛집_강릉_카페클램/post.md -p naver -y
+python main.py run input/2026/01/맛집_강릉_카페클램/post.md -p tistory -y
 ```
 
 ---
@@ -55,11 +70,16 @@ git push origin main
 ### 일반적인 작업 흐름
 
 ```bash
+# 1. 대화형 모드로 실행 (추천)
+python main.py
+
+# 또는 수동으로 작업하는 경우:
+
 # 1. 작업 시작 전 최신 상태 동기화
 git pull origin main
 
 # 2. 글 작성 및 발행
-python blog_cli.py run input/2026/01/맛집_카페클램/post.md -y
+python main.py run input/2026/01/맛집_카페클램/post.md -y
 
 # 3. 작업 완료 후 저장소에 업로드
 git add .
@@ -193,18 +213,21 @@ persona: friendly_woman
 ## ⚙️ CLI 명령어
 
 ```bash
+# 대화형 모드 (추천)
+python main.py
+
 # 기본 발행 (네이버 + 티스토리)
-python blog_cli.py run <post.md 경로> -y
+python main.py run <post.md 경로> -y
 
 # 특정 플랫폼만 발행
-python blog_cli.py run <post.md 경로> -p naver -y
-python blog_cli.py run <post.md 경로> -p tistory -y
+python main.py run <post.md 경로> -p naver -y
+python main.py run <post.md 경로> -p tistory -y
 
 # 미리보기 모드 (발행 전 확인)
-python blog_cli.py run <post.md 경로>
+python main.py run <post.md 경로>
 
 # headless 모드 (브라우저 숨김)
-python blog_cli.py run <post.md 경로> --headless -y
+python main.py run <post.md 경로> --headless -y
 ```
 
 ### 옵션 설명
@@ -305,7 +328,7 @@ blog/
 ├── README.md                    # 프로젝트 설명서
 ├── requirements.txt             # Python 패키지 의존성
 ├── .env                         # 환경변수 (API 키, 계정 정보)
-├── blog_cli.py                  # CLI 실행 파일
+├── main.py                      # CLI 실행 파일 (진입점)
 │
 ├── config/
 │   └── guidelines/              # AI 글 작성 지침 문서

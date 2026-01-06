@@ -279,11 +279,62 @@ class ContentGenerator:
                     "folder_name": parts[2] if len(parts) > 2 else post_dir.name,
                     "media_count": len(media_files),
                     "media_files": media_files,
+                    "published": self._get_publish_status(post_dir),
                 })
             except Exception as e:
                 logger.warning(f"포스트 로드 실패: {post_file} - {e}")
         
         return sorted(posts, key=lambda x: (x.get("year", ""), x.get("month", ""), x.get("folder_name", "")))
+    
+    def _get_publish_status(self, post_dir: Path) -> dict:
+        """발행 상태 확인
+        
+        Args:
+            post_dir: 포스트 디렉터리
+        
+        Returns:
+            발행 상태 딕셔너리 {"naver": "2026-01-06 10:30", "tistory": None}
+        """
+        import json
+        
+        published_file = post_dir / "published.json"
+        if published_file.exists():
+            try:
+                with open(published_file, 'r', encoding='utf-8') as f:
+                    return json.load(f)
+            except:
+                pass
+        return {"naver": None, "tistory": None}
+    
+    @staticmethod
+    def mark_as_published(post_dir: Path, platform: str):
+        """발행 완료 표시
+        
+        Args:
+            post_dir: 포스트 디렉터리
+            platform: 발행된 플랫폼 (naver, tistory)
+        """
+        import json
+        
+        published_file = Path(post_dir) / "published.json"
+        
+        # 기존 데이터 로드
+        data = {"naver": None, "tistory": None}
+        if published_file.exists():
+            try:
+                with open(published_file, 'r', encoding='utf-8') as f:
+                    data = json.load(f)
+            except:
+                pass
+        
+        # 발행 시간 기록
+        data[platform] = datetime.now().strftime("%Y-%m-%d %H:%M")
+        
+        # 저장
+        with open(published_file, 'w', encoding='utf-8') as f:
+            json.dump(data, f, ensure_ascii=False, indent=2)
+        
+        logger.info(f"✅ 발행 기록 저장: {platform} - {published_file}")
     
     def generate_all_drafts(self, year: str = None, month: str = None) -> list:
         """모든 입력 포스트에 대해 초안 생성
