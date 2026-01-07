@@ -18,3 +18,7 @@ htmlcov/
 dist/
 build/
 *.egg-info/
+
+# 입력 데이터: 예시 1개만 추적, 나머지는 무시
+input/**
+!input/sample_post.md

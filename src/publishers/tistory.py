@@ -641,14 +641,13 @@ class TistoryPublisher(BasePublisher):
             
             # 방법 2: Python의 win32clipboard 모듈 시도
             try:
-                from PIL import Image
                 import io
                 import win32clipboard
                 
                 # 이미지를 BMP 형식으로 변환
-                img = Image.open(image_path)
+                img = self._load_image_with_exif_orientation(image_path)
                 output = io.BytesIO()
-                img.convert('RGB').save(output, 'BMP')
+                img.save(output, 'BMP')
                 data = output.getvalue()[14:]  # BMP 헤더 제거
                 output.close()
                 
@@ -700,6 +699,17 @@ class TistoryPublisher(BasePublisher):
         except Exception as e:
             logger.warning(f"⚠️ Linux 클립보드 복사 실패: {e}")
             return False
+
+    def _load_image_with_exif_orientation(self, image_path: str):
+        """EXIF 방향 정보를 반영해 이미지를 로드한 뒤 파일 핸들을 닫은 상태로 반환"""
+        from PIL import Image, ImageOps
+
+        with Image.open(image_path) as img:
+            try:
+                img = ImageOps.exif_transpose(img)
+            except Exception:
+                pass
+            return img.convert('RGB').copy()  # copy()로 파일 핸들 분리
     
     def _get_paste_key(self):
         """OS별 붙여넣기 키 반환"""
@@ -817,35 +827,48 @@ class TistoryPublisher(BasePublisher):
                 # 모달이 있으면 닫기 (이전 업로드에서 남아있을 수 있음)
                 self._close_modal_if_exists()
                 
-                # 0. 이미지 크기 확인 및 필요시 리사이즈
+                # 0. 이미지 크기 확인 + EXIF 방향 보정 + 필요시 리사이즈
                 image_path = Path(path)
                 temp_image_path = None
                 file_size_mb = image_path.stat().st_size / (1024 * 1024)
+                needs_resize = file_size_mb > 4  # 4MB 이상이면 리사이즈
+                needs_orientation_fix = False
                 
-                if file_size_mb > 4:  # 4MB 이상이면 리사이즈
-                    try:
-                        from PIL import Image
-                        import tempfile
+                try:
+                    from PIL import Image, ImageOps
+                    import tempfile
+
+                    with Image.open(path) as img:
+                        orientation = None
+                        exif = img.getexif()
+                        if exif:
+                            orientation = exif.get(274)
+                            if orientation and orientation != 1:
+                                needs_orientation_fix = True
                         
-                        with Image.open(path) as img:
-                            # 최대 크기 제한 (가로 1800px)
-                            max_width = 1800
-                            if img.width > max_width:
-                                ratio = max_width / img.width
-                                new_size = (max_width, int(img.height * ratio))
-                                img = img.resize(new_size, Image.LANCZOS)
-                            
-                            # 임시 파일로 저장 (품질 85%)
+                        img = ImageOps.exif_transpose(img)
+                        
+                        # 최대 크기 제한 (가로 1800px) - 리사이즈 조건일 때만 적용
+                        max_width = 1800
+                        if needs_resize and img.width > max_width:
+                            ratio = max_width / img.width
+                            new_size = (max_width, int(img.height * ratio))
+                            img = img.resize(new_size, Image.LANCZOS)
+                        
+                        if needs_resize or needs_orientation_fix:
                             temp_fd, temp_path = tempfile.mkstemp(suffix='.jpg')
                             os.close(temp_fd)
                             img.convert('RGB').save(temp_path, 'JPEG', quality=85)
                             temp_image_path = temp_path
+                            path = temp_path
                             
                             new_size_mb = Path(temp_path).stat().st_size / (1024 * 1024)
-                            logger.debug(f"이미지 리사이즈: {file_size_mb:.1f}MB → {new_size_mb:.1f}MB")
-                            path = temp_path
-                    except Exception as e:
-                        logger.warning(f"이미지 리사이즈 실패: {e}")
+                            if needs_resize:
+                                logger.debug(f"이미지 리사이즈: {file_size_mb:.1f}MB → {new_size_mb:.1f}MB")
+                            if needs_orientation_fix and not needs_resize:
+                                logger.debug("이미지 EXIF 방향 보정 후 임시 저장")
+                except Exception as e:
+                    logger.warning(f"이미지 전처리 실패(회전/리사이즈): {e}")
                 
                 # 1. 이미지를 클립보드에 복사 (OS별 분기)
                 if not self._copy_image_to_clipboard(path):

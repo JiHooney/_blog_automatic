@@ -778,17 +778,6 @@ def publish_mode():
         console.print(f"  {status} {key}")
     
     console.print(f"\n🎉 {success_count}/{total_count} 발행 완료!", style="green bold")
-    
-    # Git 푸시 제안
-    if success_count > 0 and Confirm.ask("\n변경사항을 Git에 푸시하시겠습니까?"):
-        try:
-            git = GitSync()
-            if git.push(f"발행 완료: {len(selected_posts)}개 글"):
-                console.print("✅ Git 푸시 완료!", style="green")
-            else:
-                console.print("⚠️ Git 푸시 실패", style="yellow")
-        except Exception as e:
-            console.print(f"⚠️ Git 오류: {e}", style="yellow")
 
 
 if __name__ == "__main__":
