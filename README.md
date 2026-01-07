@@ -4,15 +4,27 @@ AI를 활용하여 블로그 글을 작성하고, 네이버/티스토리에 자�
 
 ## 🚀 빠른 시작
 
-### 1. 글 작성 준비
+### 1. 글 작성 준비 (입력 폴더 구조 만들기)
+
+- 필수 구조: `input/{년도}/{월}/{카테고리}_{주제}/post.md`
+- 예시: `input/2026/01/맛집_강릉_카페클램/post.md`
+- 참고용 예시 파일: `input/sample_post.md` (이것만 git 추적, 나머지 input은 .gitignore 처리)
+
+폴더 생성 명령 예시:
+
+- Git Bash / WSL
 
 ```bash
-# 1. input 폴더에 글 디렉터리 생성 (년/월/카테고리_주제명)
 mkdir -p input/2026/01/맛집_강릉_카페클램
-
-# 2. post.md 파일 생성
-# 3. media 폴더에 이미지 추가 (선택)
 ```
+
+- PowerShell (Windows 기본 터미널)
+
+```powershell
+New-Item -ItemType Directory -Force input/2026/01/맛집_강릉_카페클램
+```
+
+`post.md`를 해당 폴더에 만들고, 필요하면 `media` 폴더를 추가해 이미지를 넣으세요.
 
 ### 2. 발행 (대화형 모드 - 추천)
 
@@ -25,12 +37,10 @@ python main.py
 ```
 
 **대화형 모드 흐름:**
-1. 자동으로 Git pull 동기화
-2. 입력 포스트 목록 표시
-3. 발행할 글 번호 선택 (1, 1,2,3, 1-3, all)
-4. 발행 플랫폼 선택 (all/naver/tistory)
-5. AI 초안 생성 및 발행
-6. 완료 후 Git push 제안
+1. 입력 포스트 목록 표시
+2. 발행할 글 번호 선택 (1, 1,2,3, 1-3, all)
+3. 발행 플랫폼 선택 (all/naver/tistory)
+4. AI 초안 생성 및 발행
 
 ### 3. 발행 (직접 명령어)
 

@@ -554,7 +554,6 @@ persona: "friendly_woman"
 def publish_mode():
     """블로그 발행 모드 - 기존 interactive_mode 로직"""
     import frontmatter
-    from ..git.sync import GitSync
     from ..ai.content_generator import ContentGenerator
     from ..ai.rewriter import PlatformRewriter
     from ..publishers.naver import NaverPublisher
@@ -562,19 +561,8 @@ def publish_mode():
     
     console.print(Panel("🚀 블로그 발행", style="bold blue"))
     
-    # 1. Git 동기화
-    console.print("\n[1/4] 📂 원격 저장소 동기화 중...", style="cyan bold")
-    try:
-        git = GitSync()
-        if git.pull():
-            console.print("  ✅ 동기화 완료", style="green")
-        else:
-            console.print("  ⚠️ 동기화 실패 (계속 진행)", style="yellow")
-    except Exception as e:
-        console.print(f"  ⚠️ Git 오류: {e} (계속 진행)", style="yellow")
-    
-    # 2. 입력 포스트 목록 조회
-    console.print("\n[2/4] 📚 입력 포스트 확인 중...", style="cyan bold")
+    # 1. 입력 포스트 목록 조회
+    console.print("\n[1/3] 📚 입력 포스트 확인 중...", style="cyan bold")
     gen = ContentGenerator()
     posts = gen.list_input_posts()
     
@@ -583,33 +571,53 @@ def publish_mode():
         console.print("  💡 input/YYYY/MM/{카테고리}_{주제}/ 폴더에 post.md를 생성하세요.", style="dim")
         return
     
+    # 최신 업데이트순 + 미발행 우선 정렬, 상위 10개만 표시
+    def is_published_any(p: dict) -> bool:
+        pub = p.get('published', {})
+        return bool(pub.get('naver')) or bool(pub.get('tistory'))
+
+    sorted_posts = sorted(
+        posts,
+        key=lambda p: (1 if is_published_any(p) else 0, -(p.get('updated_ts') or 0))
+    )
+    display_posts = sorted_posts[:10]
+
     # 테이블 출력
-    table = Table(title="📚 입력 포스트 목록")
+    table = Table(title="📚 입력 포스트 목록 (최신 10개)")
     table.add_column("번호", style="bold cyan", justify="right")
+    table.add_column("업데이트", style="cyan")
     table.add_column("경로", style="white")
     table.add_column("제목/키워드", style="dim")
     table.add_column("카테고리", style="magenta")
     table.add_column("미디어", justify="right")
     table.add_column("발행", justify="center")
-    
-    for i, post in enumerate(posts, 1):
+
+    for i, post in enumerate(display_posts, 1):
         path = f"{post['year']}/{post['month']}/{post['folder_name']}"
         keywords = ", ".join(post['keywords'][:2]) if post['keywords'] else post['title']
         category = post.get('category', '-')
-        
+
         # 발행 상태 표시
         published = post.get('published', {})
         naver_pub = "N" if published.get('naver') else "-"
         tistory_pub = "T" if published.get('tistory') else "-"
         pub_status = f"[green]{naver_pub}[/green] [blue]{tistory_pub}[/blue]"
-        
-        table.add_row(str(i), path, keywords, category, str(post['media_count']), pub_status)
-    
+
+        table.add_row(
+            str(i),
+            post.get('updated_at', '-') or '-',
+            path,
+            keywords,
+            category,
+            str(post['media_count']),
+            pub_status
+        )
+
     console.print(table)
     console.print("  [dim]발행: N=네이버, T=티스토리, -=미발행[/dim]")
     
-    # 3. 발행할 글 선택
-    console.print("\n[3/4] 🎯 발행할 글 선택", style="cyan bold")
+    # 2. 발행할 글 선택
+    console.print("\n[2/3] 🎯 발행할 글 선택", style="cyan bold")
     console.print("  여러 개 선택: 1,2,3 또는 범위: 1-3 또는 전체: all", style="dim")
     
     selection = Prompt.ask("  발행할 글 번호", default="1")
@@ -633,12 +641,12 @@ def publish_mode():
             return
     
     # 범위 검증
-    selected_indices = [i for i in selected_indices if 0 <= i < len(posts)]
+    selected_indices = [i for i in selected_indices if 0 <= i < len(display_posts)]
     if not selected_indices:
         console.print("  ❌ 선택된 글이 없습니다.", style="red")
         return
     
-    selected_posts = [posts[i] for i in selected_indices]
+    selected_posts = [display_posts[i] for i in selected_indices]
     console.print(f"  ✅ {len(selected_posts)}개 글 선택됨", style="green")
     
     # 플랫폼 선택
@@ -686,8 +694,8 @@ def publish_mode():
         console.print("  발행이 취소되었습니다.", style="yellow")
         return
     
-    # 4. 발행 실행
-    console.print("\n[4/4] 🚀 블로그 발행 중...", style="cyan bold")
+    # 3. 발행 실행
+    console.print("\n[3/3] 🚀 블로그 발행 중...", style="cyan bold")
     
     target_platforms = ["naver", "tistory"] if platform_choice == "all" else [platform_choice]
     rewriter = PlatformRewriter()

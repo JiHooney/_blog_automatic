@@ -257,6 +257,34 @@ class ContentGenerator:
                 # 미디어 파일 목록
                 media_dir = post_dir / "media"
                 media_files = list(media_dir.iterdir()) if media_dir.exists() else []
+
+                # 업데이트 시간 계산 (post.md, media, generated, published.json 중 최신)
+                try:
+                    updated_ts = post_file.stat().st_mtime
+                except Exception:
+                    updated_ts = 0
+                try:
+                    generated_dir = post_dir / "generated"
+                    if generated_dir.exists():
+                        gen_times = [f.stat().st_mtime for f in generated_dir.glob("*.md") if f.is_file()]
+                        if gen_times:
+                            updated_ts = max(updated_ts, max(gen_times))
+                except Exception:
+                    pass
+                try:
+                    pub_file = post_dir / "published.json"
+                    if pub_file.exists():
+                        updated_ts = max(updated_ts, pub_file.stat().st_mtime)
+                except Exception:
+                    pass
+                try:
+                    if media_files:
+                        media_times = [f.stat().st_mtime for f in media_files if f.is_file()]
+                        if media_times:
+                            updated_ts = max(updated_ts, max(media_times))
+                except Exception:
+                    pass
+                updated_at = datetime.fromtimestamp(updated_ts).strftime("%Y-%m-%d %H:%M") if updated_ts else "-"
                 
                 # 경로에서 연/월 추출
                 rel_path = post_dir.relative_to(self.INPUT_DIR)
@@ -279,6 +307,8 @@ class ContentGenerator:
                     "folder_name": parts[2] if len(parts) > 2 else post_dir.name,
                     "media_count": len(media_files),
                     "media_files": media_files,
+                    "updated_ts": updated_ts,
+                    "updated_at": updated_at,
                     "published": self._get_publish_status(post_dir),
                 })
             except Exception as e:
