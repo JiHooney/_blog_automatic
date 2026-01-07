@@ -5,6 +5,7 @@ typer를 사용한 명령행 인터페이스
 import typer
 from rich.console import Console
 from rich.table import Table
+from rich import box
 from rich.panel import Panel
 from rich.progress import Progress, SpinnerColumn, TextColumn
 from rich.prompt import Prompt, Confirm
@@ -582,15 +583,25 @@ def publish_mode():
     )
     display_posts = sorted_posts[:10]
 
-    # 테이블 출력
-    table = Table(title="📚 입력 포스트 목록 (최신 10개)")
-    table.add_column("번호", style="bold cyan", justify="right")
-    table.add_column("업데이트", style="cyan")
-    table.add_column("경로", style="white")
-    table.add_column("제목/키워드", style="dim")
-    table.add_column("카테고리", style="magenta")
-    table.add_column("미디어", justify="right")
-    table.add_column("발행", justify="center")
+    # 테이블 출력 (고정 폭 + 줄바꿈 방지)
+    def truncate(text: str, width: int) -> str:
+        if text is None:
+            return "-"
+        text = str(text)
+        return text if len(text) <= width else text[: max(0, width - 1)] + "…"
+
+    table = Table(
+        title="📚 입력 포스트 목록 (최신 10개)",
+        box=box.SIMPLE_HEAVY,
+        show_lines=False
+    )
+    table.add_column("번호", style="bold cyan", justify="right", no_wrap=True, max_width=4)
+    table.add_column("업데이트", style="cyan", no_wrap=True, max_width=16)
+    table.add_column("경로", style="white", no_wrap=True, overflow="ellipsis", max_width=18)
+    table.add_column("제목/키워드", style="dim", no_wrap=True, overflow="ellipsis", max_width=24)
+    table.add_column("카테고리", style="magenta", no_wrap=True, max_width=8)
+    table.add_column("미디어", justify="right", no_wrap=True, max_width=6)
+    table.add_column("발행", justify="center", no_wrap=True, max_width=6)
 
     for i, post in enumerate(display_posts, 1):
         path = f"{post['year']}/{post['month']}/{post['folder_name']}"
@@ -605,10 +616,10 @@ def publish_mode():
 
         table.add_row(
             str(i),
-            post.get('updated_at', '-') or '-',
-            path,
-            keywords,
-            category,
+            truncate(post.get('updated_at', '-') or '-', 16),
+            truncate(path, 18),
+            truncate(keywords, 24),
+            truncate(category, 8),
             str(post['media_count']),
             pub_status
         )

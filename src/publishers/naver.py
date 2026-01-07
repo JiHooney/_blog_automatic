@@ -233,13 +233,42 @@ class NaverPublisher(BasePublisher):
                     image_map[img_name] = img_path
                 logger.info(f"📷 이미지 {len(image_map)}개 로드: {list(image_map.keys())}")
             
-            # 본문 입력 - 문단별로 입력 (이미지 처리 포함)
-            paragraphs = content.split('\n\n')
+            # 본문 입력 - 코드 블록 먼저 분리 후 문단별로 입력
+            # 마크다운 코드 블록 패턴: ```언어\n코드\n```
+            code_block_pattern = re.compile(r'```(\w*)\n(.*?)```', re.DOTALL)
+            
+            # 코드 블록을 플레이스홀더로 치환하고 나중에 처리
+            code_blocks = []
+            def replace_code_block(match):
+                lang = match.group(1) or ''
+                code = match.group(2).strip()
+                idx = len(code_blocks)
+                code_blocks.append({'lang': lang, 'code': code})
+                return f'__CODE_BLOCK_{idx}__'
+            
+            content_with_placeholders = code_block_pattern.sub(replace_code_block, content)
+            
+            paragraphs = content_with_placeholders.split('\n\n')
             last_was_naver_map = False  # 이전 문단이 네이버 지도 링크였는지 추적
             
             for para in paragraphs:
                 if para.strip():
                     text = para.strip()
+                    
+                    # 코드 블록 플레이스홀더 확인
+                    code_placeholder_match = re.match(r'__CODE_BLOCK_(\d+)__', text)
+                    if code_placeholder_match:
+                        idx = int(code_placeholder_match.group(1))
+                        block = code_blocks[idx]
+                        if self._insert_code_block(block['code'], block['lang']):
+                            logger.info(f"💻 코드 블록 삽입 완료 (언어: {block['lang'] or 'plain'})")
+                        else:
+                            # 소스코드 블록 삽입 실패 시 일반 텍스트로 입력
+                            actions = ActionChains(self.driver)
+                            actions.send_keys(f"[코드]\n{block['code']}\n[/코드]").send_keys(Keys.ENTER).send_keys(Keys.ENTER).perform()
+                            logger.warning("⚠️ 소스코드 블록 대신 일반 텍스트로 입력됨")
+                        time.sleep(0.5)
+                        continue
                     
                     # [IMAGE: 파일명] 패턴 확인
                     image_match = re.match(r'\[IMAGE:\s*([^\]]+)\]', text, re.IGNORECASE)
@@ -658,6 +687,130 @@ class NaverPublisher(BasePublisher):
         
         return False
     
+    def _insert_code_block(self, code: str, language: str = "") -> bool:
+        """네이버 에디터에 소스코드 블록 삽입
+        
+        Args:
+            code: 삽입할 코드 내용
+            language: 프로그래밍 언어 (선택)
+        
+        Returns:
+            삽입 성공 여부
+        """
+        from selenium.webdriver.common.action_chains import ActionChains
+        
+        try:
+            logger.info(f"💻 소스코드 블록 삽입 시도 (언어: {language or 'plain'})")
+            
+            # 1. 툴바에서 '소스코드' 버튼 찾기 및 클릭
+            code_btn_selectors = [
+                "button[data-name='code']",
+                ".se-code-toolbar-button",
+                "button.se-document-toolbar-basic-button[data-name='code']",
+                "[class*='toolbar'] button[class*='code']",
+                "button[data-log='dot.code']",
+            ]
+            
+            code_btn = None
+            for selector in code_btn_selectors:
+                try:
+                    code_btn = WebDriverWait(self.driver, 3).until(
+                        EC.element_to_be_clickable((By.CSS_SELECTOR, selector))
+                    )
+                    if code_btn:
+                        break
+                except:
+                    continue
+            
+            if not code_btn:
+                # XPath로 '소스코드' 텍스트가 있는 버튼 찾기
+                try:
+                    code_btn = self.driver.find_element(
+                        By.XPATH, 
+                        "//button[contains(@class, 'toolbar') and .//span[contains(text(), '소스코드')]]"
+                    )
+                except:
+                    pass
+            
+            if not code_btn:
+                logger.warning("⚠️ 소스코드 버튼을 찾을 수 없음 - 일반 텍스트로 삽입")
+                return False
+            
+            # 버튼 클릭
+            self.driver.execute_script("arguments[0].click();", code_btn)
+            time.sleep(1)
+            
+            # 2. 소스코드 입력 영역 찾기 (textarea 또는 contenteditable)
+            code_input_selectors = [
+                ".se-code-source-editor",
+                "textarea.se-code-source-editor",
+                ".se-module-code textarea",
+                ".se-section-code textarea",
+                "[class*='code'] textarea",
+            ]
+            
+            code_input = None
+            for selector in code_input_selectors:
+                try:
+                    code_input = WebDriverWait(self.driver, 3).until(
+                        EC.presence_of_element_located((By.CSS_SELECTOR, selector))
+                    )
+                    if code_input:
+                        break
+                except:
+                    continue
+            
+            if code_input:
+                # textarea에 직접 입력
+                code_input.click()
+                time.sleep(0.3)
+                
+                # JavaScript로 값 설정 (긴 코드도 빠르게 입력)
+                self.driver.execute_script(
+                    "arguments[0].value = arguments[1]; arguments[0].dispatchEvent(new Event('input', {bubbles: true}));",
+                    code_input,
+                    code
+                )
+                time.sleep(0.5)
+                
+                logger.info("✅ 소스코드 블록 삽입 완료")
+            else:
+                # contenteditable 영역에 입력 시도
+                try:
+                    code_area = self.driver.find_element(By.CSS_SELECTOR, ".se-module-code, .se-section-code")
+                    code_area.click()
+                    time.sleep(0.3)
+                    
+                    actions = ActionChains(self.driver)
+                    # 코드를 줄 단위로 입력
+                    for line in code.split('\n'):
+                        actions.send_keys(line).send_keys(Keys.ENTER)
+                    actions.perform()
+                    time.sleep(0.5)
+                    
+                    logger.info("✅ 소스코드 블록 삽입 완료 (contenteditable)")
+                except Exception as e:
+                    logger.warning(f"⚠️ 소스코드 영역 입력 실패: {e}")
+                    return False
+            
+            # 3. 코드 블록 외부로 커서 이동 (ESC 또는 클릭)
+            ActionChains(self.driver).send_keys(Keys.ESCAPE).perform()
+            time.sleep(0.3)
+            
+            # 본문 영역 클릭하여 커서 이동
+            try:
+                # 코드 블록 다음에 새 텍스트 영역 생성을 위해 Enter
+                ActionChains(self.driver).send_keys(Keys.ENTER).perform()
+                time.sleep(0.3)
+            except:
+                pass
+            
+            return True
+            
+        except Exception as e:
+            logger.warning(f"⚠️ 소스코드 블록 삽입 실패: {e}")
+            return False
+
     def logout(self):
         """로그아웃 및 브라우저 종료"""
         self.browser_manager.quit()
