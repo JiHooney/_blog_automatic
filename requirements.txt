@@ -1,0 +1,35 @@
+# AI API
+anthropic>=0.5.0
+
+# 웹 자동화
+selenium>=4.15.0
+webdriver-manager>=4.0.0
+
+# 이미지/영상 처리
+Pillow>=10.0.0
+
+# CLI
+typer>=0.9.0
+rich>=13.0.0
+
+# 환경변수
+python-dotenv>=1.0.0
+
+# HTTP 요청
+requests>=2.31.0
+
+# 유틸리티
+pydantic>=2.0.0
+loguru>=0.7.0
+
+# Git 연동
+GitPython>=3.1.40
+
+# 마크다운 파싱
+python-frontmatter>=1.0.0
+
+# Windows 클립보드 지원 (Windows에서만 필요, 선택 사항)
+# pip install pywin32  # Windows에서 이미지 업로드 시 필요
+
+# 테스트
+pytest>=7.4.0

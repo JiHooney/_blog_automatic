@@ -1,0 +1,33 @@
+# 환경변수, 캐시, 가상환경 등 제외
+.env
+.venv/
+venv/
+__pycache__/
+*.pyc
+.DS_Store
+
+**/*.log
+
+# IDE
+.idea/
+.vscode/
+
+# 테스트 커버리지
+.coverage
+htmlcov/
+
+# 빌드
+dist/
+build/
+*.egg-info/
+
+# 입력 데이터: 예시 1개만 추적, 나머지는 무시
+input/**
+!input/sample_post.md
+
+# 초안(drafts): 로컬에서만 사용, git 제외
+drafts/**
+!drafts/.gitkeep
+
+# 에러 스크린샷
+*_error.png
