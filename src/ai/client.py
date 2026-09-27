@@ -32,7 +32,8 @@ class AIClient:
         Args:
             model: 사용할 모델명. None이면 기본값 사용
         """
-        self.use_local_server = os.getenv("USE_LOCAL_SERVER", "true").lower() == "true"
+        #self.use_local_server = os.getenv("USE_LOCAL_SERVER", "true").lower() == "true"
+        self.use_local_server = os.getenv("USE_LOCAL_SERVER", "false").lower() == "false"
 
         if self.use_local_server:
             self.base_url = os.getenv("FREE_CLAUDE_CODE_URL", "http://localhost:8083")
@@ -42,7 +43,18 @@ class AIClient:
             self.base_url = os.getenv("EXTERNAL_AI_URL", "https://api.anthropic.com")
             self.auth_token = os.getenv("EXTERNAL_AI_KEY", "")
 
-        self.model = model or os.getenv("DEFAULT_AI_MODEL", "claude-sonnet-4-20250514")
+        # self.model = model or os.getenv("DEFAULT_AI_MODEL", "claude-sonnet-4-20250514")
+        self.model = model or os.getenv(
+            "DEFAULT_AI_MODEL",
+            "claude-sonnet-4-5"
+        )
+
+        print("========== AI CONFIG ==========")
+        print("use_local_server =", self.use_local_server)
+        print("base_url         =", self.base_url)
+        print("model            =", self.model)
+        print("api_key          =", self.auth_token[:20] + "...")
+        print("================================")
 
         if self.use_local_server:
             logger.info(f"AI 클라이언트 초기화 완료 (로컬 서버: {self.base_url}, 모델: {self.model})")
@@ -120,11 +132,32 @@ class AIClient:
                 ]
             }
 
-            response = requests.post(url, json=payload, headers=headers, timeout=120, stream=True)
+            # response = requests.post(url, json=payload, headers=headers, timeout=120, stream=True)
+            # response.raise_for_status()
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=120,
+                stream=self.use_local_server
+            )
+
+            print("========== RESPONSE ==========")
+            print("status =", response.status_code)
+            print(response.text)
+            print("==============================")
+
             response.raise_for_status()
 
-            # SSE 응답 파싱
-            result_text = self._parse_sse_response(response)
+            if self.use_local_server:
+                result_text = self._parse_sse_response(response)
+            else:
+                data = response.json()
+                result_text = "".join(
+                    block["text"]
+                    for block in data["content"]
+                    if block["type"] == "text"
+                )
 
             logger.success(f"✅ 텍스트 생성 완료 ({len(result_text)}자)")
             return result_text
@@ -171,11 +204,28 @@ class AIClient:
                 "messages": messages
             }
 
-            response = requests.post(url, json=payload, headers=headers, timeout=120, stream=True)
+            response = requests.post(
+                url,
+                json=payload,
+                headers=headers,
+                timeout=120,
+                stream=self.use_local_server
+            )
+
             response.raise_for_status()
 
-            # SSE 응답 파싱
-            result_text = self._parse_sse_response(response)
+            if self.use_local_server:
+                # 로컬 free-claude-code 서버 (SSE)
+                result_text = self._parse_sse_response(response)
+            else:
+                # Anthropic API (JSON)
+                data = response.json()
+
+                result_text = "".join(
+                    block["text"]
+                    for block in data["content"]
+                    if block["type"] == "text"
+                )
 
             logger.success(f"✅ 텍스트 생성 완료 ({len(result_text)}자)")
             return result_text

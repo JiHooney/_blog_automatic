@@ -8,6 +8,38 @@ from typing import Optional, Union
 import frontmatter
 from loguru import logger
 
+MEDIA_EXTENSIONS = {
+    ".jpg", ".jpeg", ".png", ".gif", ".bmp", ".webp",
+    ".mp4", ".mov", ".avi", ".wmv", ".mkv", ".webm",
+}
+
+
+def resolve_media_files(file_path: Union[str, Path], post=None) -> list[Path]:
+    """초안의 원본 입력 디렉터리에서 미디어 파일을 찾는다.
+
+    generated/*.md 또는 drafts/*.md를 발행할 때 초안 옆이 아니라 frontmatter의
+    input_dir/source가 가리키는 원본 post.md 옆 media 디렉터리를 우선 사용한다.
+    """
+    file_path = Path(file_path)
+    post = post or frontmatter.load(file_path)
+
+    candidates = []
+    input_dir = post.get("input_dir")
+    source = post.get("source")
+    if input_dir:
+        candidates.append(Path(input_dir) / "media")
+    if source:
+        candidates.append(Path(source).parent / "media")
+    candidates.append(file_path.parent / "media")
+
+    for media_dir in candidates:
+        if media_dir.is_dir():
+            return sorted(
+                f for f in media_dir.iterdir()
+                if f.is_file() and f.suffix.casefold() in MEDIA_EXTENSIONS
+            )
+    return []
+
 
 class BasePublisher(ABC):
     """블로그 발행자 베이스 클래스"""
@@ -75,11 +107,7 @@ class BasePublisher(ABC):
         keywords = post.get("keywords", [])
         tags = keywords if isinstance(keywords, list) else keywords.split(", ")
         
-        # 이미지 경로 추출 (같은 폴더의 media/ 디렉터리)
-        media_dir = file_path.parent / "media"
-        images = []
-        if media_dir.exists():
-            images = [f for f in media_dir.iterdir() if f.is_file()]
+        images = resolve_media_files(file_path, post)
         
         logger.info(f"📝 발행 준비: {title}")
         

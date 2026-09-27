@@ -5,6 +5,7 @@ Selenium을 사용하여 네이버 블로그에 글 발행
 import os
 import re
 import time
+import unicodedata
 from pathlib import Path
 from typing import Optional, List
 from selenium.webdriver.common.by import By
@@ -59,6 +60,9 @@ class NaverPublisher(BasePublisher):
             self.driver = self.browser_manager.create_driver()
             self.driver.get(self.LOGIN_URL)
             time.sleep(2)
+
+            print("URL:", self.driver.current_url)
+            print("TITLE:", self.driver.title)
             
             logger.info("🔐 네이버 로그인 시도 중...")
             
@@ -74,11 +78,30 @@ class NaverPublisher(BasePublisher):
             )
             time.sleep(0.5)
             
+            # 현재 페이지의 버튼 확인
+            buttons = self.driver.find_elements(By.TAG_NAME, "button")
+
+            print("===== BUTTONS =====")
+            for b in buttons:
+                print(
+                    "id:", b.get_attribute("id"),
+                    "| class:", b.get_attribute("class"),
+                    "| type:", b.get_attribute("type"),
+                    "| text:", b.text
+                )
+            print("===================")
+
             # 로그인 버튼 클릭
-            login_btn = self.driver.find_element(By.ID, "log.login")
+            login_btn = WebDriverWait(self.driver, 10).until(
+                EC.element_to_be_clickable((By.ID, "loginBtn_row"))
+            )
+            print(self.driver.page_source[:3000])
             login_btn.click()
-            
-            time.sleep(3)
+            print("clicked!")
+            time.sleep(4)
+
+            print("after click url =", self.driver.current_url)
+            print("after click title =", self.driver.title)
             
             # 로그인 성공 확인
             if not self._is_login_page():
@@ -100,8 +123,16 @@ class NaverPublisher(BasePublisher):
                 logger.success("✅ 네이버 로그인 성공 (수동 인증)")
                 return True
                 
-        except Exception as e:
-            logger.error(f"❌ 네이버 로그인 실패: {e}")
+        except Exception:
+            import traceback
+
+            traceback.print_exc()
+
+            print("URL =", self.driver.current_url)
+            print("TITLE =", self.driver.title)
+
+            input("에러 확인 후 Enter를 누르세요...")
+
             return False
     
     def publish(
@@ -137,6 +168,10 @@ class NaverPublisher(BasePublisher):
             
             logger.info(f"📝 네이버 블로그 글 작성 중: {title}")
             
+            logger.info("===== CONTENT START =====")
+            logger.info(content)
+            logger.info("===== CONTENT END =====")
+
             from selenium.webdriver.common.action_chains import ActionChains
             
             # JavaScript로 빠르게 팝업/도움말 닫기
@@ -286,7 +321,14 @@ class NaverPublisher(BasePublisher):
                     if code_placeholder_match:
                         idx = int(code_placeholder_match.group(1))
                         block = code_blocks[idx]
-                        if self._insert_code_block(block['code'], block['lang']):
+                        # 언어가 없는 fenced block은 보통 기본정보/요약 박스다.
+                        # 네이버 코드 컴포넌트에 넣으면 이후 본문 커서까지 그 박스에
+                        # 갇힐 수 있으므로 일반 본문으로 입력한다.
+                        if not block['lang']:
+                            actions = ActionChains(self.driver)
+                            actions.send_keys(block['code']).send_keys(Keys.ENTER).send_keys(Keys.ENTER).perform()
+                            logger.info("📝 일반 텍스트 블록 삽입 완료")
+                        elif self._insert_code_block(block['code'], block['lang']):
                             logger.info(f"💻 코드 블록 삽입 완료 (언어: {block['lang'] or 'plain'})")
                         else:
                             # 소스코드 블록 삽입 실패 시 일반 텍스트로 입력
@@ -634,24 +676,7 @@ class NaverPublisher(BasePublisher):
         for attempt in range(3):
             try:
                 # 이미지 파일 찾기
-                image_path = None
-                image_name_lower = image_name.lower().replace(' ', '')
-                
-                # 정확한 파일명 매칭 또는 부분 매칭
-                for name, path in image_map.items():
-                    name_clean = name.lower().replace(' ', '')
-                    # 정확한 매칭
-                    if image_name_lower == name_clean:
-                        image_path = path
-                        break
-                    # 부분 매칭 (파일명에 검색어가 포함되거나 검색어에 파일명이 포함)
-                    if image_name_lower in name_clean or name_clean in image_name_lower:
-                        image_path = path
-                        break
-                    # 숫자 매칭 (예: "2.내부인테리어.jpg" vs "2.내부인테리어.jpg")
-                    if name_clean.startswith(image_name_lower.split('.')[0] + '.'):
-                        image_path = path
-                        break
+                image_path = self._find_media_path(image_name, image_map)
                 
                 if not image_path or not Path(image_path).exists():
                     logger.warning(f"⚠️ 이미지 파일을 찾을 수 없음: {image_name}")
@@ -743,6 +768,29 @@ class NaverPublisher(BasePublisher):
                 return False
         
         return False
+
+    @staticmethod
+    def _normalize_media_name(name: str) -> str:
+        """macOS NFD/일반 NFC 한글 파일명을 동일하게 비교한다."""
+        return unicodedata.normalize("NFC", str(name)).casefold().replace(" ", "")
+
+    @classmethod
+    def _find_media_path(cls, media_name: str, media_map: dict):
+        """정규화된 파일명, 부분 문자열, 고유 번호 순으로 미디어를 찾는다."""
+        target = cls._normalize_media_name(media_name)
+        target_number = re.match(r'^(\d+)[_.-]', target)
+        for name, path in media_map.items():
+            candidate = cls._normalize_media_name(name)
+            if target == candidate or target in candidate or candidate in target:
+                return path
+            candidate_number = re.match(r'^(\d+)[_.-]', candidate)
+            if (
+                target_number
+                and candidate_number
+                and target_number.group(1) == candidate_number.group(1)
+            ):
+                return path
+        return None
     
     def _insert_code_block(self, code: str, language: str = "") -> bool:
         """네이버 에디터에 소스코드 블록 삽입

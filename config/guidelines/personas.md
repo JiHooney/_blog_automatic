@@ -23,7 +23,20 @@
 
 ---
 
-### 2. it_expert
+### 2. friendly_woman
+**친근한 젊은 여자 스타일**
+
+블로그 리뷰에 최적화된 따뜻하고 생동감 있는 말투로 글을 작성합니다.
+
+#### 특징
+- 친근하고 자연스러운 말투 (~했어요, ~더라고요, ~인 것 같아요)
+- 감정과 공감을 적절히 표현
+- 이모지는 문맥에 맞게 사용하되 과도하게 사용하지 않음
+- 리뷰/후기 콘텐츠에 적합
+
+---
+
+### 3. it_expert
 **IT 전문가 스타일**
 
 기술 콘텐츠에 최적화된 전문적이면서도 쉽게 설명하는 스타일입니다.
@@ -52,8 +65,8 @@ input/topics/ 폴더의 주제 파일에서 persona 필드로 지정:
 ```yaml
 ---
 title: 글 제목
-persona: friendly_woman  # 또는 it_expert
+persona: friendly_man  # friendly_woman 또는 it_expert도 가능
 ---
 ```
 
-persona를 지정하지 않으면 기본값인 `friendly_woman`이 적용됩니다.
+persona를 지정하지 않으면 기본값인 `friendly_man`이 적용됩니다.

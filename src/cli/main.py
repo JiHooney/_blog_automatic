@@ -254,6 +254,7 @@ def publish_naver(
     """네이버 블로그에 발행"""
     import frontmatter
     from ..publishers.naver import NaverPublisher
+    from ..publishers.base import resolve_media_files
     
     # 초안 로드
     post = frontmatter.load(draft_path)
@@ -272,7 +273,9 @@ def publish_naver(
             result = publisher.publish(
                 title=post.get('title', '제목 없음'),
                 content=post.content,
-                tags=post.get('keywords', [])
+                category=post.get('category'),
+                tags=post.get('keywords', []),
+                images=[str(path) for path in resolve_media_files(draft_path, post)]
             )
             publisher.logout()
             progress.update(task, completed=True)
@@ -293,6 +296,7 @@ def publish_tistory(
     """티스토리 블로그에 발행"""
     import frontmatter
     from ..publishers.tistory import TistoryPublisher
+    from ..publishers.base import resolve_media_files
     
     # 초안 로드
     post = frontmatter.load(draft_path)
@@ -311,7 +315,9 @@ def publish_tistory(
             result = publisher.publish(
                 title=post.get('title', '제목 없음'),
                 content=post.content,
-                tags=post.get('keywords', [])
+                category=post.get('category'),
+                tags=post.get('keywords', []),
+                images=[str(path) for path in resolve_media_files(draft_path, post)]
             )
             publisher.logout()
             progress.update(task, completed=True)
@@ -333,6 +339,7 @@ def publish_all(
     import frontmatter
     from ..publishers.naver import NaverPublisher
     from ..publishers.tistory import TistoryPublisher
+    from ..publishers.base import resolve_media_files
     from ..ai.rewriter import PlatformRewriter
     
     # 초안 로드
@@ -340,6 +347,9 @@ def publish_all(
     title = post.get('title', '제목 없음')
     content = post.content
     tags = post.get('keywords', [])
+    category = post.get('category')
+    persona = post.get('persona', 'friendly_man')
+    media_files = [str(path) for path in resolve_media_files(draft_path, post)]
     
     console.print(Panel(f"📝 {title}", title="발행할 글"))
     
@@ -351,10 +361,10 @@ def publish_all(
     # 네이버 발행
     console.print("\n🟢 네이버 블로그 발행 중...", style="cyan")
     try:
-        naver_title, naver_content = rewriter.rewrite_content(content, "naver", title)
+        naver_title, naver_content = rewriter.rewrite_content(content, "naver", title, persona)
         publisher = NaverPublisher(headless=headless)
         if publisher.login():
-            results['naver'] = publisher.publish(title=naver_title, content=naver_content, tags=tags)
+            results['naver'] = publisher.publish(title=naver_title, content=naver_content, category=category, tags=tags, images=media_files)
             publisher.logout()
         else:
             results['naver'] = False
@@ -368,10 +378,10 @@ def publish_all(
     # 티스토리 발행
     console.print("\n🟠 티스토리 블로그 발행 중...", style="cyan")
     try:
-        tistory_title, tistory_content = rewriter.rewrite_content(content, "tistory", title)
+        tistory_title, tistory_content = rewriter.rewrite_content(content, "tistory", title, persona)
         publisher = TistoryPublisher(headless=headless)
         if publisher.login():
-            results['tistory'] = publisher.publish(title=tistory_title, content=tistory_content, tags=tags)
+            results['tistory'] = publisher.publish(title=tistory_title, content=tistory_content, category=category, tags=tags, images=media_files)
             publisher.logout()
         else:
             results['tistory'] = False
@@ -449,6 +459,7 @@ def run_workflow(
     original_title = post.get('title', '제목 없음')
     tags = post.get('keywords', [])
     category = post.get('category', None)  # 카테고리
+    persona = post.get('persona', 'friendly_man')
     input_dir = post.get('input_dir', None)  # 이미지 경로용
     rewriter = PlatformRewriter()
     
@@ -465,7 +476,9 @@ def run_workflow(
         
         try:
             # 플랫폼별로 다른 제목과 내용 생성 (리라이팅)
-            platform_title, platform_content = rewriter.rewrite_content(post.content, platform, original_title)
+            platform_title, platform_content = rewriter.rewrite_content(
+                post.content, platform, original_title, persona
+            )
             console.print(f"    📝 {platform} 제목: {platform_title}", style="dim")
             
             if platform == "naver":
@@ -832,6 +845,7 @@ def publish_mode():
         original_title = post.get('title', '제목 없음')
         tags = post.get('keywords', [])
         category = post.get('category', None)
+        persona = post.get('persona', 'friendly_man')
         input_dir = post.get('input_dir', None)
         
         # 플랫폼별 발행
@@ -840,7 +854,7 @@ def publish_mode():
             
             try:
                 platform_title, platform_content = rewriter.rewrite_content(
-                    post.content, platform, original_title
+                    post.content, platform, original_title, persona
                 )
                 
                 if platform == "naver":

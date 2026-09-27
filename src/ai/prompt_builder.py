@@ -16,9 +16,12 @@ class PromptBuilder:
     
     # 페르소나 매핑
     PERSONAS = {
+        "friendly_man": "친근한 젊은 남자 스타일. 정확한 정보를 다정하지만 담백하게 전달하고, '~입니다', '~했어요', '~이더라고요'를 사용합니다. 여성적인 애교체나 과도한 이모지는 사용하지 않습니다.",
         "friendly_woman": "친근한 젊은 여자 스타일",
         "it_expert": "IT 전문가 스타일"
     }
+
+    DEFAULT_PERSONA = "friendly_man"
     
     def __init__(self):
         """프롬프트 빌더 초기화"""
@@ -39,16 +42,16 @@ class PromptBuilder:
         
         return guidelines
     
-    def build_system_prompt(self, persona: str = "friendly_woman") -> str:
+    def build_system_prompt(self, persona: str = DEFAULT_PERSONA) -> str:
         """시스템 프롬프트 생성
         
         Args:
-            persona: 페르소나 타입 (friendly_woman / it_expert)
+            persona: 페르소나 타입 (friendly_man / friendly_woman / it_expert)
         
         Returns:
             시스템 프롬프트 문자열
         """
-        persona_name = self.PERSONAS.get(persona, self.PERSONAS["friendly_woman"])
+        persona_name = self.PERSONAS.get(persona, self.PERSONAS[self.DEFAULT_PERSONA])
         
         # 공통 지침 + 페르소나 정보
         general = self.guidelines.get("general", "")
@@ -107,10 +110,40 @@ class PromptBuilder:
         if media_descriptions:
             prompt += f"""## 포함할 미디어
 {chr(10).join(f"- {desc}" for desc in media_descriptions)}
+### 매우 중요한 규칙
 
-미디어는 본문 중간중간에 자연스럽게 배치해주세요.
-이미지 위치는 [IMAGE: 파일명 또는 설명] 형식으로,
-영상 위치는 [VIDEO: 파일명 또는 설명] 형식으로 표시해주세요.
+위 목록이 실제 촬영한 사진과 영상입니다.
+
+반드시 이 목록에 있는 내용만 근거로 글을 작성하세요.
+
+파일명에는 음식명, 메뉴명, 분위기, 느낌, 후기 등이 포함되어 있으므로
+파일명을 적극 활용하여 내용을 작성하세요.
+
+절대로 사진에 없는 음식이나 서비스를 상상해서 작성하지 마세요.
+
+예를 들어
+'스테이크'
+'티라미수'
+'파스타'
+등이 파일명에 없다면 절대로 등장시키면 안 됩니다.
+
+본문에서 사진이나 영상을 사용하는 위치에는
+
+[IMAGE: 실제 파일명]
+
+또는
+
+[VIDEO: 실제 파일명]
+
+형식 그대로 작성하세요.
+
+예)
+
+[IMAGE: 5_음식1_트러블이탈리안크림뇨끼_정말쫀득하고맛있어서_소스까지싹싹긁어먹었다.jpg]
+
+[VIDEO: 5_음식4_흐름하이볼_따르는장면_너무빛깔이영롱하고맛있었다.mp4]
+
+파일명을 절대로 임의로 줄이거나 변경하지 마세요.
 
 """
         
@@ -122,7 +155,11 @@ class PromptBuilder:
 """
         return prompt
     
-    def build_platform_rewrite_prompt(self, platform: str) -> str:
+    def build_platform_rewrite_prompt(
+        self,
+        platform: str,
+        persona: str = DEFAULT_PERSONA,
+    ) -> str:
         """플랫폼별 리라이팅용 시스템 프롬프트
         
         Args:
@@ -132,10 +169,16 @@ class PromptBuilder:
             플랫폼별 시스템 프롬프트
         """
         platform_guideline = self.guidelines.get(platform, "")
+        persona_description = self.PERSONAS.get(
+            persona, self.PERSONAS[self.DEFAULT_PERSONA]
+        )
         
         return f"""당신은 블로그 콘텐츠를 리라이팅하는 전문가입니다.
 
 ## 플랫폼: {platform.upper()}
+
+## 반드시 유지할 페르소나: {persona}
+{persona_description}
 
 ## 플랫폼별 지침
 {platform_guideline}
@@ -146,9 +189,16 @@ class PromptBuilder:
 3. 해당 플랫폼에 최적화된 스타일로 변환하세요.
 4. SEO 요소 (제목, 키워드, 메타 설명)도 플랫폼에 맞게 조정하세요.
 5. 이미지/영상 마커 [IMAGE: ...], [VIDEO: ...]는 그대로 유지하세요.
+6. 원문의 말투와 무관하게 위 페르소나의 말투를 끝까지 일관되게 유지하세요.
 """
     
-    def build_rewrite_prompt(self, original_content: str, platform: str, original_title: str = None) -> str:
+    def build_rewrite_prompt(
+        self,
+        original_content: str,
+        platform: str,
+        original_title: str = None,
+        persona: str = DEFAULT_PERSONA,
+    ) -> str:
         """리라이팅 요청 프롬프트
         
         Args:
@@ -164,6 +214,9 @@ class PromptBuilder:
             "tistory": "정보 전달 중심, 깔끔한 구조, 전문적인 느낌",
             "wordpress": "글로벌 독자 대상, 체계적인 구조, 상세한 설명"
         }
+        persona_description = self.PERSONAS.get(
+            persona, self.PERSONAS[self.DEFAULT_PERSONA]
+        )
         
         title_style = {
             "naver": "이모티콘 포함, 호기심 유발, 구어체 (예: '진짜 찐 후기!', '솔직히 말해서요...')",
@@ -178,6 +231,10 @@ class PromptBuilder:
 
 ## 원본 글
 {original_content}
+
+## 적용할 페르소나
+- 코드: {persona}
+- 말투: {persona_description}
 
 ## 필수 변경 사항
 

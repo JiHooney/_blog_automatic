@@ -19,6 +19,7 @@ class ContentGenerator:
     ROOT_DIR = Path(__file__).parent.parent.parent
     INPUT_DIR = ROOT_DIR / "input"
     DRAFTS_DIR = ROOT_DIR / "drafts"
+    PERSONA_PROMPT_VERSION = 2
     
     def __init__(self):
         """콘텐츠 생성기 초기화"""
@@ -26,7 +27,11 @@ class ContentGenerator:
         self.prompt_builder = PromptBuilder()
         logger.info("콘텐츠 생성기 초기화 완료")
 
-    def _get_generated_drafts(self, input_path: Union[str, Path]) -> list[Path]:
+    def _get_generated_drafts(
+        self,
+        input_path: Union[str, Path],
+        persona: str = None,
+    ) -> list[Path]:
         """입력 포스트의 기존 generated 초안 목록 조회"""
         input_path = Path(input_path)
         generated_dir = input_path.parent / "generated"
@@ -34,11 +39,28 @@ class ContentGenerator:
         if not generated_dir.exists():
             return []
 
-        return sorted(
+        drafts = sorted(
             [draft for draft in generated_dir.glob("*.md") if draft.is_file()],
             key=lambda draft: draft.stat().st_mtime,
             reverse=True,
         )
+
+        if persona is None:
+            return drafts
+
+        compatible_drafts = []
+        for draft in drafts:
+            try:
+                generated_post = frontmatter.load(draft)
+                if (
+                    generated_post.get("persona") == persona
+                    and generated_post.get("persona_prompt_version")
+                    == self.PERSONA_PROMPT_VERSION
+                ):
+                    compatible_drafts.append(draft)
+            except Exception as error:
+                logger.warning(f"기존 초안 메타데이터 확인 실패 ({draft}): {error}")
+        return compatible_drafts
     
     def load_input(self, input_path: Union[str, Path]) -> dict:
         """입력 파일 로드
@@ -67,7 +89,7 @@ class ContentGenerator:
             "title": post.get("title", "제목 없음"),
             "keywords": post.get("keywords", "").split(", ") if isinstance(post.get("keywords"), str) else post.get("keywords", []),
             "category": post.get("category", ""),
-            "persona": post.get("persona", "friendly_woman"),
+            "persona": post.get("persona", PromptBuilder.DEFAULT_PERSONA),
             "content": post.content,
             "media_files": media_files,
             "input_path": input_path,
@@ -127,14 +149,14 @@ class ContentGenerator:
         Returns:
             생성되었거나 재사용된 초안 파일 경로
         """
-        existing_drafts = self._get_generated_drafts(input_path)
+        input_data = self.load_input(input_path)
+        existing_drafts = self._get_generated_drafts(
+            input_path, input_data["persona"]
+        )
         if existing_drafts:
             logger.info(f"⏭️ 기존 generated 초안 재사용: {existing_drafts[0]}")
             return existing_drafts[0]
 
-        # 입력 로드
-        input_data = self.load_input(input_path)
-        
         # 주요 포인트 추출
         main_points = self._parse_main_points(input_data["content"])
         
@@ -188,7 +210,7 @@ class ContentGenerator:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         safe_title = "".join(c for c in input_data["title"] if c.isalnum() or c in " -_").strip()
         safe_title = safe_title.replace(" ", "_")[:50]
-        filename = f"{timestamp}_{safe_title}.md"
+        filename = f"{timestamp}_{input_data['persona']}_{safe_title}.md"
         
         draft_path = generated_dir / filename
         
@@ -202,6 +224,7 @@ class ContentGenerator:
         post["keywords"] = input_data["keywords"]
         post["category"] = input_data["category"]
         post["persona"] = input_data["persona"]
+        post["persona_prompt_version"] = self.PERSONA_PROMPT_VERSION
         post["created_at"] = datetime.now().isoformat()
         post["status"] = "draft"
         post["source"] = str(input_data["input_path"])

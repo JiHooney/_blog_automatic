@@ -32,7 +32,8 @@ class PlatformRewriter:
         self,
         content: str,
         platform: str,
-        title: str = None
+        title: str = None,
+        persona: str = PromptBuilder.DEFAULT_PERSONA,
     ) -> Tuple[str, str]:
         """콘텐츠 문자열을 직접 리라이팅
         
@@ -48,8 +49,10 @@ class PlatformRewriter:
             raise ValueError(f"지원하지 않는 플랫폼: {platform}. 가능한 값: {self.PLATFORMS}")
         
         # 프롬프트 생성
-        system_prompt = self.prompt_builder.build_platform_rewrite_prompt(platform)
-        user_prompt = self.prompt_builder.build_rewrite_prompt(content, platform, title)
+        system_prompt = self.prompt_builder.build_platform_rewrite_prompt(platform, persona)
+        user_prompt = self.prompt_builder.build_rewrite_prompt(
+            content, platform, title, persona
+        )
         
         logger.info(f"🔄 {platform.upper()}용 리라이팅 중: {title or '제목 없음'}")
         
@@ -122,10 +125,13 @@ class PlatformRewriter:
         post = frontmatter.load(original_path)
         original_content = post.content
         original_title = post.get("title", "제목 없음")
+        persona = post.get("persona", PromptBuilder.DEFAULT_PERSONA)
         
         # 프롬프트 생성
-        system_prompt = self.prompt_builder.build_platform_rewrite_prompt(platform)
-        user_prompt = self.prompt_builder.build_rewrite_prompt(original_content, platform, original_title)
+        system_prompt = self.prompt_builder.build_platform_rewrite_prompt(platform, persona)
+        user_prompt = self.prompt_builder.build_rewrite_prompt(
+            original_content, platform, original_title, persona
+        )
         
         logger.info(f"🔄 {platform.upper()}용 리라이팅 중: {original_title}")
         
@@ -194,6 +200,9 @@ class PlatformRewriter:
         post["keywords"] = original_post.get("keywords", [])
         post["category"] = original_post.get("category", "")
         post["platform"] = platform
+        post["persona"] = original_post.get(
+            "persona", PromptBuilder.DEFAULT_PERSONA
+        )
         post["original_file"] = str(original_path)
         post["rewritten_at"] = datetime.now().isoformat()
         post["status"] = "ready"  # 발행 준비 완료
